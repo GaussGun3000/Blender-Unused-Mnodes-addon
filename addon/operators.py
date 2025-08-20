@@ -143,10 +143,10 @@ class UnusedNodeOperator(bpy.types.Operator):
             if not (mat and mat.use_nodes and mat.node_tree):
                 continue
             used, unused = self.classify_material_nodes(mat.node_tree)
+            total_unused += len(unused)
             self.attach_attribute_nodes(mat.node_tree, unused)
             Framer.frame_unused_nodes(mat.node_tree, used, unused)
             self._report_material_result(mat, unused)
-            total_unused += len(unused)
 
         total_unused += self._group_inspector.total_internal_unused
         self.report({'INFO'}, f"Total unused nodes: {total_unused}" if total_unused else "No unused nodes found.")

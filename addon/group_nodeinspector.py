@@ -148,22 +148,28 @@ class GroupNodeInspector:
                               used_in: List[str],
                               present_unused_in: List[str],
                               unused_internal: Set[bpy.types.Node]) -> None:
-        self._say(f"[Group: {group_tree.name}]")
-        self._say("Group node is found in:")
+        header = f"[Group: {group_tree.name}]"
+        self._output(header)
+
+        # --- materials referencing this group ---
         if not used_in and not present_unused_in:
-            self._say("  — no materials reference this group.")
+            msg = "Group node is found in:\n  — no materials reference this group."
         else:
-            for name in sorted(used_in):
-                self._say(f"  {name}, used")
-            for name in sorted(present_unused_in):
-                self._say(f"  {name}, unused")
+            refs = ["Group node is found in:"]
+            refs += [f"  {name}, used" for name in sorted(used_in)]
+            refs += [f"  {name}, unused" for name in sorted(present_unused_in)]
+            msg = "\n".join(refs)
 
+        self._output(msg)
+
+        # --- internal unused nodes ---
         if unused_internal:
-            self._say("Internal unused nodes:")
-            for n in sorted(unused_internal, key=lambda x: x.name):
-                self._say(f"  - {n.name} (type={n.type})")
+            unused_lines = ["Internal unused nodes:"]
+            unused_lines += [f"  - {n.name} (type={n.type})"
+                             for n in sorted(unused_internal, key=lambda x: x.name)]
+            self._output("\n".join(unused_lines))
 
-    def _say(self, msg: str) -> None:
+    def _output(self, msg: str) -> None:
         """
         Outputs message into console and _op
         :param msg: Message to print
@@ -172,5 +178,5 @@ class GroupNodeInspector:
         if self._op is not None:
             try:
                 self._op.report({'INFO'}, msg)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Exception on output from GroupNodeInspector: {e}")
