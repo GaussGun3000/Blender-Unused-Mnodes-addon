@@ -151,9 +151,7 @@ class GroupNodeInspector:
                               used_in: List[str],
                               present_unused_in: List[str],
                               unused_internal: Set[bpy.types.Node]) -> None:
-        header = f"[Group: {group_tree.name}]"
-        self._output(header)
-
+        msg = f"[Group: {group_tree.name}]\n"
         # --- materials referencing this group ---
         if not used_in and not present_unused_in:
             msg = "Group node is found in:\n  — no materials reference this group."
@@ -161,13 +159,13 @@ class GroupNodeInspector:
             refs = ["Group node is found in:"]
             refs += [f"  {name}, used" for name in sorted(used_in)]
             refs += [f"  {name}, unused" for name in sorted(present_unused_in)]
-            msg = "\n".join(refs)
+            msg += "\n".join(refs)
 
         self._output(msg)
 
         # --- internal unused nodes ---
         if unused_internal:
-            unused_lines = ["Internal unused nodes:"]
+            unused_lines = [f"{group_tree.name} - internal unused nodes:"]
             unused_lines += [f"  - {n.name} (type={n.type})"
                              for n in sorted(unused_internal, key=lambda x: x.name)]
             self._output("\n".join(unused_lines))
