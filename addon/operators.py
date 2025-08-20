@@ -1,7 +1,8 @@
-from typing import Set, Tuple
+from typing import Set, Tuple, Union, List
 
 import bpy
 from addon.group_nodeinspector import GroupNodeInspector
+from addon.framer import Framer
 
 class UnusedNodeOperator(bpy.types.Operator):
     bl_idname = "node.detect_unused_nodes"
@@ -15,7 +16,7 @@ class UnusedNodeOperator(bpy.types.Operator):
         return {'FINISHED'}
 
     def attach_attribute_nodes(self, node_tree: bpy.types.NodeTree,
-                               nodes) -> None:
+                               nodes:  Union[Set[bpy.types.Node], List[bpy.types.Node]]) -> None:
         """
         For each node in `nodes`, if it has at least one free input,
         attach a Shader 'Attribute' node to the left and link it.
@@ -24,6 +25,7 @@ class UnusedNodeOperator(bpy.types.Operator):
         SKIP_NODE_TYPES = {"OUTPUT_MATERIAL", "GROUP_OUTPUT", "FRAME"}
         ATTR_NAME =  "Auto Attribute"
 
+        new_nodes = set() if isinstance(nodes, set) else list()
         for n in nodes:
             if not node_tree or not n:
                 continue
@@ -42,9 +44,14 @@ class UnusedNodeOperator(bpy.types.Operator):
             if attr.outputs and free_inputs:
                 try:
                     node_tree.links.new(attr.outputs[0], free_inputs[0])
+                    new_nodes.add(attr) if isinstance(nodes, set) else new_nodes.append(attr)
                 except Exception as e:
                     print(f"Exception when attaching Attribute {e}, skipping")
                     node_tree.nodes.remove(attr)
+        if isinstance(nodes, set):
+            nodes.update(new_nodes)
+        else:
+            nodes.extend(new_nodes)
 
     def evaluate_node(self,
                       node: bpy.types.Node,
@@ -137,6 +144,7 @@ class UnusedNodeOperator(bpy.types.Operator):
                 continue
             used, unused = self.classify_material_nodes(mat.node_tree)
             self.attach_attribute_nodes(mat.node_tree, unused)
+            Framer.frame_unused_nodes(mat.node_tree, used, unused)
             self._report_material_result(mat, unused)
             total_unused += len(unused)
 

@@ -1,5 +1,6 @@
-from typing import Callable, Iterable, Tuple, Set, Dict, List
+from typing import Callable, Iterable, Set, Dict, List
 import bpy
+from addon.framer import Framer
 
 class GroupNodeInspector:
     """
@@ -26,6 +27,7 @@ class GroupNodeInspector:
             used_in, present_unused_in = self._materials_usage_for_group(group_tree)
             used_g, unused_g = self._classify_group_nodes(group_tree)
             self.attach_attribute_nodes(group_tree, unused_g)
+            Framer.frame_unused_nodes(group_tree, used_g, unused_g)
             self.total_internal_unused += len(unused_g)
             self._report_group_summary(group_tree, used_in, present_unused_in, unused_g)
             self._visited_group_trees.add(group_tree)
