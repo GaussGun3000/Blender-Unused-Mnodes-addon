@@ -24,13 +24,13 @@ class GroupNodeInspector:
             return
 
         try:
+            self._visited_group_trees.add(group_tree)
             used_in, present_unused_in = self._materials_usage_for_group(group_tree)
             used_g, unused_g = self._classify_group_nodes(group_tree)
             self.attach_attribute_nodes(group_tree, unused_g)
             Framer.frame_unused_nodes(group_tree, used_g, unused_g)
             self.total_internal_unused += len(unused_g)
             self._report_group_summary(group_tree, used_in, present_unused_in, unused_g)
-            self._visited_group_trees.add(group_tree)
         except Exception as e:
             print("Unhandled exception at GroupNodeInspector.inspect_group:", e)
 
@@ -90,7 +90,7 @@ class GroupNodeInspector:
                                start_node: bpy.types.Node,
                                valid_outputs: Iterable[bpy.types.Node]) -> tuple[bool, Set[bpy.types.Node]]:
         """
-        Forward DFS following output links. Group nodes are treated like normal nodes.
+        Forward DFS following output links.
         """
         stack = [start_node]
         visited: Set[bpy.types.Node] = set()
@@ -106,6 +106,9 @@ class GroupNodeInspector:
             if n in valid:
                 reaches = True
                 continue
+
+            if n.type == 'GROUP' and getattr(n, "node_tree", None):
+                self.inspect_group(n.node_tree)
 
             for out in getattr(n, "outputs", []):
                 if out.is_linked:
