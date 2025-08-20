@@ -1,6 +1,7 @@
 from typing import Set, Tuple
 
 import bpy
+from addon.group_nodeinspector import GroupNodeInspector
 
 class UnusedNodeOperator(bpy.types.Operator):
     bl_idname = "node.detect_unused_nodes"
@@ -8,9 +9,38 @@ class UnusedNodeOperator(bpy.types.Operator):
     bl_description = "Finds unused material nodes and adds Attribute nodes to them (if applicable)"
     bl_options = {'REGISTER', 'UNDO'}
 
+    # def __init__(self):
+    #
+
     def execute(self, context):
+        self._group_inspector = GroupNodeInspector(reporter_op=self)
         total = self.process_all_materials()
         return {'FINISHED'}
+
+    def evaluate_node(self,
+                      node: bpy.types.Node,
+                      valid_outputs: set) -> tuple[bool, list]:
+        """
+        Evaluate a single node:
+          - returns (reaches_output_here, downstream_neighbors)
+          - if node is a GROUP, evaluate the group and its NodeTree
+        Does NOT mutate traversal state beyond GROUP bookkeeping.
+        """
+        if node in valid_outputs:
+            return True, []
+
+        if node.type == 'GROUP' and getattr(node, "node_tree", None):
+            print("FOUND GROUP")
+            self._group_inspector.inspect_group(node.node_tree)
+
+        # downstream neighbors from all linked outputs
+        neighbors = []
+        for out in getattr(node, "outputs", []):
+            if out.is_linked:
+                for link in out.links:
+                    neighbors.append(link.to_node)
+
+        return False, neighbors
 
     def _walk_to_output(self,
                         start_node: bpy.types.Node,
@@ -21,7 +51,7 @@ class UnusedNodeOperator(bpy.types.Operator):
         """
         stack = [start_node]
         visited = set()
-        reaches = False
+        reaches_any_output = False
 
         while stack:
             n = stack.pop()
@@ -29,23 +59,22 @@ class UnusedNodeOperator(bpy.types.Operator):
                 continue
             visited.add(n)
 
-            if n in valid_outputs:
-                reaches = True
-                # don't early-return; still mark everyone we touched in this walk
-                continue
+            # single-node evaluation (handles GROUP bookkeeping internally)
+            reaches_here, next_nodes = self.evaluate_node(n, valid_outputs)
+            if reaches_here:
+                reaches_any_output = True
 
-            # push downstream neighbors
-            for out in getattr(n, "outputs", []):
-                if out.is_linked:
-                    for link in out.links:
-                        stack.append(link.to_node)
+            # enqueue downstream neighbors
+            for nn in next_nodes:
+                if nn not in visited:
+                    stack.append(nn)
 
-        return reaches, visited
+        return reaches_any_output, visited
 
     def classify_material_nodes(self, tree: bpy.types.NodeTree) -> Tuple[Set[bpy.types.Node], Set[bpy.types.Node]]:
         """
         Classify nodes in a MATERIAL node tree into (used, unused).
-        A node is 'used' if there's a forward path to an (active) Material Output.
+        A node is 'used' if there's a forward path to an active Material Output.
         """
         if tree is None:
             return set(), set()
@@ -94,8 +123,10 @@ class UnusedNodeOperator(bpy.types.Operator):
             print(f"[Material: {mat.name}] No unused nodes.")
             return
 
-        self.report({'INFO'}, f"[Material: {mat.name}] Unused nodes ({len(unused_nodes)}):")
+        rmsg = f"[Material: {mat.name}] Unused nodes ({len(unused_nodes)}):"
         print(f"[Material: {mat.name}] Unused nodes ({len(unused_nodes)}):")
         for n in sorted(unused_nodes, key=lambda x: x.name):
-            self.report({'INFO'}, f"{n.name} (type={n.type})")
+            rmsg += f"\n - {n.name} (type={n.type})"
             print(f"  - {n.name} (type={n.type})")
+
+        self.report({'INFO'}, rmsg)
