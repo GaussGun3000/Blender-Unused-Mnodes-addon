@@ -7,11 +7,13 @@ class GroupNodeInspector:
     Public methods:
         inspectGroup(group_tree, classify_material_nodes_fn)
     """
-    def __init__(self, reporter_op: bpy.types.Operator | None = None):
+    def __init__(self, attach_attribute_nodes: Callable, reporter_op: bpy.types.Operator | None = None):
         self._op = reporter_op
+        self.attach_attribute_nodes = attach_attribute_nodes
         self._visited_group_trees: Set[bpy.types.NodeTree] = set()
         self._usage_cache: dict[bpy.types.NodeTree, tuple[list[str], list[str]]] = {}
         self._group_internal_cache: dict[bpy.types.NodeTree, tuple[Set[bpy.types.Node], Set[bpy.types.Node]]] = {}
+        self.total_internal_unused = 0
 
     def inspect_group(self, group_tree: bpy.types.NodeTree) -> None:
         if not group_tree:
@@ -23,12 +25,17 @@ class GroupNodeInspector:
         try:
             used_in, present_unused_in = self._materials_usage_for_group(group_tree)
             used_g, unused_g = self._classify_group_nodes(group_tree)
+            self.attach_attribute_nodes(group_tree, unused_g)
+            self.total_internal_unused += len(unused_g)
             self._report_group_summary(group_tree, used_in, present_unused_in, unused_g)
             self._visited_group_trees.add(group_tree)
         except Exception as e:
             print("Unhandled exception at GroupNodeInspector.inspect_group:", e)
 
     def _materials_usage_for_group(self, group_tree: bpy.types.NodeTree) -> tuple[list[str], list[str]]:
+        """
+        Find materials Group is used in
+        """
         if group_tree in self._usage_cache:
             return self._usage_cache[group_tree]
 
@@ -55,8 +62,11 @@ class GroupNodeInspector:
         self._usage_cache[group_tree] = (used_in, present_unused_in)
         return used_in, present_unused_in
 
-    # ------------- classify material (shallow; no group-inspection) -------------
+
     def _classify_material_nodes_shallow(self, tree: bpy.types.NodeTree) -> tuple[Set[bpy.types.Node], Set[bpy.types.Node]]:
+        """
+        Split nodes into used and unused in a material. Used to determine if Group instance is used in a material.
+        """
         nodes = set(tree.nodes)
         outs = [n for n in tree.nodes if n.type == 'OUTPUT_MATERIAL']
         act = [n for n in outs if getattr(n, "is_active_output", False)]
@@ -69,16 +79,17 @@ class GroupNodeInspector:
 
         while unclassified:
             start = unclassified.pop()
-            reaches, visited = self._forward_walk_no_group(tree, start, valid_outputs)
+            reaches, visited = self._forward_walk_no_group(start, valid_outputs)
             (used if reaches else unused).update(visited)
             unclassified.difference_update(visited)
         return used, unused
 
     def _forward_walk_no_group(self,
-                               tree: bpy.types.NodeTree,
                                start_node: bpy.types.Node,
                                valid_outputs: Iterable[bpy.types.Node]) -> tuple[bool, Set[bpy.types.Node]]:
-        """Forward DFS following output links. GROUP nodes are treated like normal nodes (no inspector calls)."""
+        """
+        Forward DFS following output links. Group nodes are treated like normal nodes.
+        """
         stack = [start_node]
         visited: Set[bpy.types.Node] = set()
         reaches = False
@@ -100,8 +111,12 @@ class GroupNodeInspector:
                         stack.append(link.to_node)
         return reaches, visited
 
-    # ------------- classify inside the group (to GROUP_OUTPUT) -------------
+
     def _classify_group_nodes(self, group_tree: bpy.types.NodeTree) -> tuple[Set[bpy.types.Node], Set[bpy.types.Node]]:
+        """
+        Split all nodes within the group into used and unused Sets
+        :return:
+        """
         if group_tree in self._group_internal_cache:
             return self._group_internal_cache[group_tree]
 
@@ -118,7 +133,7 @@ class GroupNodeInspector:
 
         while unclassified:
             start = unclassified.pop()
-            reaches, visited = self._forward_walk_no_group(group_tree, start, valid)
+            reaches, visited = self._forward_walk_no_group(start, valid)
             (used if reaches else unused).update(visited)
             unclassified.difference_update(visited)
 
@@ -126,7 +141,6 @@ class GroupNodeInspector:
         self._group_internal_cache[group_tree] = res
         return res
 
-    # ------------- reporting -------------
     def _report_group_summary(self,
                               group_tree: bpy.types.NodeTree,
                               used_in: List[str],
@@ -148,6 +162,10 @@ class GroupNodeInspector:
                 self._say(f"  - {n.name} (type={n.type})")
 
     def _say(self, msg: str) -> None:
+        """
+        Outputs message into console and _op
+        :param msg: Message to print
+        """
         print(msg)
         if self._op is not None:
             try:

@@ -9,13 +9,42 @@ class UnusedNodeOperator(bpy.types.Operator):
     bl_description = "Finds unused material nodes and adds Attribute nodes to them (if applicable)"
     bl_options = {'REGISTER', 'UNDO'}
 
-    # def __init__(self):
-    #
-
     def execute(self, context):
-        self._group_inspector = GroupNodeInspector(reporter_op=self)
+        self._group_inspector = GroupNodeInspector(self.attach_attribute_nodes, self)
         total = self.process_all_materials()
         return {'FINISHED'}
+
+    def attach_attribute_nodes(self, node_tree: bpy.types.NodeTree,
+                               nodes) -> None:
+        """
+        For each node in `nodes`, if it has at least one free input,
+        attach a Shader 'Attribute' node to the left and link it.
+        Skips outputs and frames.
+        """
+        SKIP_NODE_TYPES = {"OUTPUT_MATERIAL", "GROUP_OUTPUT", "FRAME"}
+        ATTR_NAME =  "Auto Attribute"
+
+        for n in nodes:
+            if not node_tree or not n:
+                continue
+            if n.type in SKIP_NODE_TYPES:
+                continue
+
+            free_inputs = [inp for inp in getattr(n, "inputs", [])
+                           if not inp.is_linked]
+            if not free_inputs:
+                continue
+
+            attr = node_tree.nodes.new("ShaderNodeAttribute")
+            attr.label = ATTR_NAME
+            attr.location = (n.location.x - 200, n.location.y)
+
+            if attr.outputs and free_inputs:
+                try:
+                    node_tree.links.new(attr.outputs[0], free_inputs[0])
+                except Exception as e:
+                    print(f"Exception when attaching Attribute {e}, skipping")
+                    node_tree.nodes.remove(attr)
 
     def evaluate_node(self,
                       node: bpy.types.Node,
@@ -30,7 +59,6 @@ class UnusedNodeOperator(bpy.types.Operator):
             return True, []
 
         if node.type == 'GROUP' and getattr(node, "node_tree", None):
-            print("FOUND GROUP")
             self._group_inspector.inspect_group(node.node_tree)
 
         # downstream neighbors from all linked outputs
@@ -59,12 +87,10 @@ class UnusedNodeOperator(bpy.types.Operator):
                 continue
             visited.add(n)
 
-            # single-node evaluation (handles GROUP bookkeeping internally)
             reaches_here, next_nodes = self.evaluate_node(n, valid_outputs)
             if reaches_here:
                 reaches_any_output = True
 
-            # enqueue downstream neighbors
             for nn in next_nodes:
                 if nn not in visited:
                     stack.append(nn)
@@ -110,9 +136,11 @@ class UnusedNodeOperator(bpy.types.Operator):
             if not (mat and mat.use_nodes and mat.node_tree):
                 continue
             used, unused = self.classify_material_nodes(mat.node_tree)
+            self.attach_attribute_nodes(mat.node_tree, unused)
             self._report_material_result(mat, unused)
             total_unused += len(unused)
 
+        total_unused += self._group_inspector.total_internal_unused
         self.report({'INFO'}, f"Total unused nodes: {total_unused}" if total_unused else "No unused nodes found.")
         return total_unused
 
